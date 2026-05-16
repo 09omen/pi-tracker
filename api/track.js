@@ -1,40 +1,41 @@
 import { supabase } from '../lib/supabase';
 
 export default async function handler(req, res) {
-  // 1. Capture visitor data from Vercel headers
+  // Prevent function from crashing globally if headers are empty
   const ip = req.headers['x-real-ip'] || req.headers['x-forwarded-for']?.split(',')[0] || 'unknown';
   const userAgent = req.headers['user-agent'] || 'unknown';
   const city = req.headers['x-vercel-ip-city'] || 'unknown';
   const country = req.headers['x-vercel-ip-country'] || 'unknown';
 
   try {
-    // 2. Insert into Supabase 'events' table
-    await supabase.from('events').insert([
-      {
-        ip: ip,
-        user_agent: userAgent,
-        city: city,
-        country: country,
-        query_params: req.query
-      }
-    ]);
-  } catch (error) {
-    console.error("Logging failed:", error);
-    // We continue so the image still loads
+    // Attempt the insert, but safely capture errors so it never triggers a 500
+    if (supabase) {
+      await supabase.from('events').insert([
+        {
+          ip: ip,
+          user_agent: userAgent,
+          city: city,
+          country: country,
+          query_params: req.query || {}
+        }
+      ]);
+    }
+  } catch (dbError) {
+    console.error("Supabase Database Error:", dbError);
+    // Do not return an error response; let the code proceed to serve the image
   }
 
-  // 3. Create a 1x1 transparent PNG pixel
-  const pixel = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8/5+hEgAHggICLsrS8AAAAABJRU5ErkJggg==',
-    'base64'
-  );
+  // A completely valid, raw 1x1 transparent GIF buffer data
+  const base64Gif = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  const pixelBuffer = Buffer.from(base64Gif, 'base64');
 
-  // 4. Force browser to NOT cache this image (so it fires every time)
-  res.setHeader('Content-Type', 'image/png');
+  // Strict image headers to prevent Vercel or browser caching
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Content-Length', pixelBuffer.length);
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
 
-  // 5. Send response
-  return res.status(200).send(pixel);
+  // Send the binary data
+  return res.status(200).end(pixelBuffer);
 }
